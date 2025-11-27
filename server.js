@@ -11,48 +11,47 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// dirname fix for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json());
 
-// Orders + download token storage
+// ORDER + DOWNLOAD TOKENS
 const orders = {};
 const downloadTokens = {};
 
-// ---------------- PRODUCT DATABASE ----------------
+// PRODUCT DATABASE
 const PRODUCTS = {
   "1xbet-crash": {
     name: "1xbet Crash Hack",
     priceUsd: 100,
     fileName: "1xbet-crash.zip",
   },
-  "1win-aviator-spribe": {
-    name: "1Win Aviator Hack",
-    priceUsd: 100,
-    fileName: "1win-aviator-spribe.zip",
-  },
   luckyjet: {
     name: "LuckyJet Hack",
     priceUsd: 100,
     fileName: "luckyjet.zip",
   },
-  "mostbet-aviator-spribe": {
-    name: "Mostbet Aviator Hack",
+  thimbles: {
+    name: "Thimbles Hack",
     priceUsd: 100,
-    fileName: "mostbet-aviator-spribe.zip",
+    fileName: "thimbles.zip",
   },
   "apple-of-fortune": {
     name: "Apple Of Fortune Hack",
     priceUsd: 100,
     fileName: "apple-of-fortune.zip",
   },
-  thimbles: {
-    name: "Thimbles Hack",
+  "1win-aviator-spribe": {
+    name: "1WIN Aviator Hack",
     priceUsd: 100,
-    fileName: "thimbles.zip",
+    fileName: "1win-aviator-spribe.zip",
+  },
+  "mostbet-aviator-spribe": {
+    name: "Mostbet Aviator Hack",
+    priceUsd: 100,
+    fileName: "mostbet-aviator-spribe.zip",
   },
   "wild-west-gold": {
     name: "Wild West Gold Hack",
@@ -71,19 +70,19 @@ const PRODUCTS = {
   },
 };
 
-// ---------------- Utility ----------------
+// GET ABSOLUTE FILE PATH
 function getFilePath(fileName) {
   return path.join(__dirname, "files", fileName);
 }
 
-// ---------------- CREATE PAYMENT ----------------
+// ---------------------- CREATE INVOICE ----------------------
 app.post("/api/create-payment", async (req, res) => {
   try {
     const { productId } = req.body;
-    const product = PRODUCTS[productId];
 
+    const product = PRODUCTS[productId];
     if (!product) {
-      return res.status(400).json({ error: "Unknown productId" });
+      return res.status(400).json({ error: "Invalid productId" });
     }
 
     const orderId = `${productId}-${Date.now()}`;
@@ -91,7 +90,6 @@ app.post("/api/create-payment", async (req, res) => {
     const payload = {
       price_amount: product.priceUsd,
       price_currency: "usd",
-      pay_currency: "usdttrc20", // FIXED — CORRECT CURRENCY CODE
       order_id: orderId,
       order_description: product.name,
       ipn_callback_url: `${process.env.BACKEND_URL}/api/ipn`,
@@ -99,10 +97,10 @@ app.post("/api/create-payment", async (req, res) => {
       cancel_url: process.env.PAYMENT_CANCEL_URL,
     };
 
-    console.log("Sending create payment payload:", payload);
+    console.log("Sending invoice payload:", payload);
 
     const response = await axios.post(
-      "https://api.nowpayments.io/v1/payment",
+      "https://api.nowpayments.io/v1/invoice",
       payload,
       {
         headers: {
@@ -112,103 +110,86 @@ app.post("/api/create-payment", async (req, res) => {
       }
     );
 
-    const payment = response.data;
+    const data = response.data;
+    console.log("NOWPayments Invoice Response:", data);
 
-    console.log("NOWPayments response:", payment);
-
-    // Save minimal order tracking
-    orders[payment.payment_id] = {
+    orders[data.id] = {
       productId,
-      status: payment.payment_status,
+      status: data.status,
       downloadToken: null,
     };
 
     return res.json({
-      paymentId: payment.payment_id,
-      paymentStatus: payment.payment_status,
-      paymentUrl: payment.invoice_url || payment.payment_url,
-      payAddress: payment.pay_address,
-      payAmount: payment.pay_amount,
-      currency: payment.pay_currency,
+      invoiceId: data.id,
+      invoiceUrl: data.invoice_url,
     });
+
   } catch (err) {
-    console.error("Create Payment ERROR:", err.response?.data || err.message);
-    return res.status(500).json({ error: "Failed to create payment" });
+    console.error("Invoice creation error:", err.response?.data || err.message);
+    return res.status(500).json({ error: "Failed to create invoice" });
   }
 });
 
-// ---------------- IPN HANDLER ----------------
+// ---------------------- IPN HANDLER ----------------------
 app.post(
   "/api/ipn",
   express.raw({ type: "application/json" }),
   (req, res) => {
     try {
-      const rawBody = req.body.toString("utf8");
+      const payload = req.body.toString("utf8");
       const sentSig = req.headers["x-nowpayments-sig"];
-
-      console.log("----- IPN RECEIVED -----");
-      console.log("RAW:", rawBody);
 
       const expectedSig = crypto
         .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
-        .update(rawBody)
+        .update(payload)
         .digest("hex");
 
-      console.log("SENT SIG:", sentSig);
-      console.log("EXPECTED SIG:", expectedSig);
-
       if (sentSig !== expectedSig) {
-        console.warn("⚠️ INVALID SIGNATURE");
+        console.warn("Invalid signature");
         return res.status(403).send("Invalid signature");
       }
 
-      console.log("IPN SIGNATURE VERIFIED");
+      const data = JSON.parse(payload);
+      const invoiceId = data.invoice_id;
 
-      const data = JSON.parse(rawBody);
-      const paymentId = data.payment_id;
+      const order = orders[invoiceId];
+      if (!order) return res.status(200).send("OK");
 
-      if (!orders[paymentId]) {
-        console.log("Order not found in memory");
-        return res.status(200).send("OK");
-      }
+      order.status = data.payment_status;
 
-      orders[paymentId].status = data.payment_status;
-
-      if (
-        ["finished", "confirmed", "sending"].includes(data.payment_status)
-      ) {
-        const prod = PRODUCTS[orders[paymentId].productId];
-        const token = crypto.randomBytes(24).toString("hex");
-
-        downloadTokens[token] = {
-          filePath: getFilePath(prod.fileName),
-          expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
-        };
-
-        orders[paymentId].downloadToken = token;
-        console.log("Download token issued:", token);
+      if (data.payment_status === "finished") {
+        const product = PRODUCTS[order.productId];
+        if (product) {
+          const token = crypto.randomBytes(24).toString("hex");
+          downloadTokens[token] = {
+            filePath: getFilePath(product.fileName),
+            expiresAt: Date.now() + 30 * 60 * 1000,
+          };
+          order.downloadToken = token;
+        }
       }
 
       return res.status(200).send("OK");
+
     } catch (err) {
-      console.error("IPN ERROR:", err.message);
+      console.error("IPN error:", err.message);
       return res.status(500).send("error");
     }
   }
 );
 
-// ---------------- CHECK ORDER STATUS ----------------
-app.get("/api/order/:paymentId", (req, res) => {
-  const order = orders[req.params.paymentId];
+// CHECK ORDER STATUS
+app.get("/api/order/:invoiceId", (req, res) => {
+  const order = orders[req.params.invoiceId];
   if (!order) return res.status(404).json({ error: "Order not found" });
 
-  return res.json({
+  res.json({
     status: order.status,
     downloadToken: order.downloadToken,
   });
 });
 
-// ---------------- DOWNLOAD FILE ----------------
+// DOWNLOAD FILE
 app.get("/api/download/:token", (req, res) => {
   const tokenData = downloadTokens[req.params.token];
 
@@ -218,22 +199,20 @@ app.get("/api/download/:token", (req, res) => {
 
   if (Date.now() > tokenData.expiresAt) {
     delete downloadTokens[req.params.token];
-    return res.status(410).send("Download expired. Please purchase again.");
+    return res.status(410).send("Download expired. Buy again.");
   }
 
   const filePath = tokenData.filePath;
-
   delete downloadTokens[req.params.token];
 
   return res.download(filePath, path.basename(filePath));
 });
 
-// ---------------- HEALTH CHECK ----------------
+// ROOT CHECK
 app.get("/", (req, res) => {
-  res.send("BYTRON NOWPayments backend running");
+  res.send("NOWPayments Invoice Backend Running");
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Backend running on port ${PORT}`);
 });
-
