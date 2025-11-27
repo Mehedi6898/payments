@@ -5,6 +5,9 @@ import axios from "axios";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
+app.get("/test", (req, res) => {
+  res.send("BYTRON Backend Working 🚀");
+});
 
 dotenv.config();
 
@@ -260,3 +263,4 @@ app.get("/", (_req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
