@@ -16,29 +16,31 @@ const __dirname = path.dirname(__filename);
 
 app.use(cors());
 app.use(express.json());
-app.use(express.raw({ type: "application/json" })); // IMPORTANT FOR IPN SIGNATURE
+app.use(express.raw({ type: "application/json" }));
 
 // ---------------- PRODUCTS ----------------
 const PRODUCTS = {
-  "1xbet-crash": { name: "1XBET Crash Hack", priceUsd: 100, fileName: "1xbet-crash.zip" },
-  "1win-aviator-spribe": { name: "1WIN Aviator Hack", priceUsd: 100, fileName: "1win-aviator-spribe.zip" },
-  luckyjet: { name: "LuckyJet Hack", priceUsd: 100, fileName: "luckyjet.zip" },
-  "mostbet-aviator-spribe": { name: "Mostbet Aviator Hack", priceUsd: 100, fileName: "mostbet-aviator-spribe.zip" },
-  "apple-of-fortune": { name: "Apple Of Fortune Hack", priceUsd: 100, fileName: "apple-of-fortune.zip" },
-  thimbles: { name: "Thimbles Hack", priceUsd: 100, fileName: "thimbles.zip" },
-  "wild-west-gold": { name: "Wild West Gold Hack", priceUsd: 100, fileName: "wild-west-gold.zip" },
-  "higher-vs-lower": { name: "Higher VS Lower Hack", priceUsd: 100, fileName: "higher-vs-lower.zip" },
-  "dragons-gold": { name: "Dragons Gold Hack", priceUsd: 100, fileName: "dragons-gold.zip" }
+  "apple-of-fortune": {
+    name: "Apple Of Fortune Hack",
+    priceUsd: 100,
+    fileName: "apple-of-fortune.zip"
+  },
+  "thimbles": {
+    name: "Thimbles Hack",
+    priceUsd: 100,
+    fileName: "thimbles.zip"
+  }
+  // add the rest...
 };
+
+const orders = {};
+const downloadTokens = {};
 
 function getFilePath(file) {
   return path.join(__dirname, "files", file);
 }
 
-const orders = {};
-const downloadTokens = {};
-
-// ---------------- CREATE PAYMENT ----------------
+// ---------------- CREATE PAYMENT (INVOICE) ----------------
 app.post("/api/create-payment", async (req, res) => {
   try {
     const { productId } = req.body;
@@ -48,7 +50,6 @@ app.post("/api/create-payment", async (req, res) => {
 
     const orderId = `${productId}-${Date.now()}`;
 
-    // THIS IS THE FIX → USE INVOICE PAYMENT
     const payload = {
       price_amount: product.priceUsd,
       price_currency: "usd",
@@ -56,15 +57,17 @@ app.post("/api/create-payment", async (req, res) => {
       order_description: product.name,
       ipn_callback_url: `${process.env.BACKEND_URL}/api/ipn`,
       success_url: process.env.PAYMENT_SUCCESS_URL,
-      cancel_url: process.env.PAYMENT_CANCEL_URL,
-      type: "invoice"
+      cancel_url: process.env.PAYMENT_CANCEL_URL
     };
 
     const response = await axios.post(
       "https://api.nowpayments.io/v1/invoice",
       payload,
       {
-        headers: { "x-api-key": process.env.NOWPAYMENTS_API_KEY }
+        headers: {
+          "x-api-key": process.env.NOWPAYMENTS_API_KEY,
+          "Content-Type": "application/json"
+        }
       }
     );
 
@@ -78,7 +81,7 @@ app.post("/api/create-payment", async (req, res) => {
 
     return res.json({
       paymentId: invoice.id,
-      paymentUrl: invoice.invoice_url // THIS SHOWS PAYMENT METHODS
+      paymentUrl: invoice.invoice_url
     });
 
   } catch (err) {
@@ -97,10 +100,6 @@ app.post("/api/ipn", (req, res) => {
       .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
       .update(raw)
       .digest("hex");
-
-    console.log("RAW IPN:", raw);
-    console.log("SENT SIG:", sentSig);
-    console.log("EXPECTED SIG:", expectedSig);
 
     if (sentSig !== expectedSig) {
       console.log("Invalid signature");
@@ -133,12 +132,9 @@ app.post("/api/ipn", (req, res) => {
 });
 
 // ---------------- ORDER CHECK ----------------
-app.get("/api/order/:id", (req, res) => {
-  const order = orders[req.params.id];
-  if (!order) return res.json({ error: "Order not found" });
-
-  return res.json(order);
-});
+app.get("/api/order/:id", (req, res) =>
+  res.json(orders[req.params.id] || { error: "not found" })
+);
 
 // ---------------- DOWNLOAD ----------------
 app.get("/api/download/:token", (req, res) => {
@@ -153,10 +149,9 @@ app.get("/api/download/:token", (req, res) => {
   const file = t.filePath;
   delete downloadTokens[req.params.token];
 
-  return res.download(file, path.basename(file));
+  res.download(file, path.basename(file));
 });
 
-// ---------------- ROOT ----------------
 app.get("/", (req, res) => {
   res.send("BYTRON NOWPayments backend OK");
 });
