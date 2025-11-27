@@ -5,13 +5,14 @@ import axios from "axios";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
+import bodyParser from "body-parser";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// dirname fix
+// dirname fix for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -19,7 +20,7 @@ const __dirname = path.dirname(__filename);
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 
-// in-memory database
+// store orders + download tokens
 const orders = {};
 const downloadTokens = {};
 
@@ -72,6 +73,7 @@ const PRODUCTS = {
   },
 };
 
+// Build absolute file path
 function getFilePath(fileName) {
   return path.join(__dirname, "files", fileName);
 }
@@ -112,7 +114,6 @@ app.post("/api/create-payment", async (req, res) => {
 
     const payment = response.data;
 
-    // save minimal info
     orders[payment.payment_id] = {
       productId,
       status: payment.payment_status,
@@ -133,34 +134,13 @@ app.post("/api/create-payment", async (req, res) => {
   }
 });
 
-// ---------------- IPN WEBHOOK ----------------
-app.post(
-  "/api/ipn",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    try {
-      const payload = req.body.toString("utf8");
-      const sentSig = req.headers["x-nowpayments-sig"];
-
-      // ========= TEST IPN SUPPORT =========
-      if (sentSig === "test_signature") {
-        console.log("NOWPayments TEST IPN received");
-        return res.status(200).send("OK");
-      }
-
-      // ========= REAL SIGNATURE VALIDATION =========
-      // ---------------- IPN WEBHOOK ----------------
-import bodyParser from "body-parser";
-
-// disable JSON parsing for this ONE route
+// ---------------- IPN WEBHOOK (RAW BODY, FIXED) ----------------
 app.post(
   "/api/ipn",
   bodyParser.raw({ type: "*/*" }),
   (req, res) => {
     try {
-      const payload = req.body; // raw buffer
-      const rawBody = payload.toString("utf8");
-
+      const rawBody = req.body.toString("utf8");
       const sentSig = req.headers["x-nowpayments-sig"];
 
       const expectedSig = crypto
@@ -181,6 +161,7 @@ app.post(
 
       order.status = data.payment_status;
 
+      // Paid → create download token
       if (
         data.payment_status === "finished" ||
         data.payment_status === "confirmed" ||
@@ -202,9 +183,6 @@ app.post(
       console.error("IPN handler error:", err.message);
       return res.status(500).send("error");
     }
-  }
-);
-
   }
 );
 
@@ -234,7 +212,6 @@ app.get("/api/download/:token", (req, res) => {
 
   const filePath = tokenData.filePath;
 
-  // remove token after download
   delete downloadTokens[req.params.token];
 
   return res.download(filePath, path.basename(filePath));
@@ -248,4 +225,3 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
