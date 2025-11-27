@@ -4,7 +4,6 @@ import dotenv from "dotenv";
 import axios from "axios";
 import crypto from "crypto";
 import path from "path";
-import bodyParser from "body-parser";
 import { fileURLToPath } from "url";
 
 dotenv.config();
@@ -12,15 +11,19 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// dirname fix
+// Fix dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// in-memory db
+// Parse JSON normally everywhere EXCEPT IPN route
+app.use(cors());
+app.use(express.json({ limit: "5mb" }));
+
+// In-memory storage
 const orders = {};
 const downloadTokens = {};
 
-// ------------------ PRODUCT DATABASE ------------------
+// ---------------- PRODUCT DATABASE ----------------
 const PRODUCTS = {
   "1xbet-crash": {
     name: "1xbet Crash Hack",
@@ -69,97 +72,27 @@ const PRODUCTS = {
   },
 };
 
+// Build absolute file path
 function getFilePath(fileName) {
   return path.join(__dirname, "files", fileName);
 }
 
-/*
-======================================================
- 🔥  IPN ROUTE MUST COME BEFORE express.json()
-======================================================
-*/
-app.post(
-  "/api/ipn",
-  bodyParser.raw({ type: "*/*" }), // catch ALL content types
-  (req, res) => {
-    try {
-      const raw = req.body.toString("utf8");
-      const sentSig = req.headers["x-nowpayments-sig"];
-
-      const expectedSig = crypto
-        .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
-        .update(raw)
-        .digest("hex");
-
-      console.log("---- IPN RECEIVED ----");
-      console.log("RAW:", raw);
-      console.log("SENT SIG:", sentSig);
-      console.log("EXPECTED SIG:", expectedSig);
-
-      if (sentSig !== expectedSig) {
-        console.log("❌ INVALID SIGNATURE");
-        return res.status(403).send("Invalid signature");
-      }
-
-      const data = JSON.parse(raw);
-      console.log("✅ IPN VERIFIED:", data);
-
-      const paymentId = data.payment_id;
-      const order = orders[paymentId];
-      if (!order) return res.status(200).send("OK");
-
-      order.status = data.payment_status;
-
-      if (
-        data.payment_status === "finished" ||
-        data.payment_status === "confirmed" ||
-        data.payment_status === "sending"
-      ) {
-        const product = PRODUCTS[order.productId];
-
-        if (product) {
-          const token = crypto.randomBytes(24).toString("hex");
-
-          downloadTokens[token] = {
-            filePath: getFilePath(product.fileName),
-            expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
-          };
-
-          order.downloadToken = token;
-          console.log("🎉 DOWNLOAD TOKEN ISSUED:", token);
-        }
-      }
-
-      return res.status(200).send("OK");
-    } catch (err) {
-      console.error("IPN ERROR:", err);
-      return res.status(500).send("error");
-    }
-  }
-);
-
-/*
-======================================================
- NOW parse JSON normally
-======================================================
-*/
-app.use(cors());
-app.use(express.json({ limit: "5mb" }));
-
-// ------------------ CREATE PAYMENT ------------------
+// ---------------- CREATE PAYMENT ----------------
 app.post("/api/create-payment", async (req, res) => {
   try {
-    const { productId, payCurrency = "usdttrc20" } = req.body;
+    const { productId, payCurrency = "any" } = req.body; // "any" shows full crypto list
 
     const product = PRODUCTS[productId];
-    if (!product) return res.status(400).json({ error: "Unknown productId" });
+    if (!product) {
+      return res.status(400).json({ error: "Unknown productId" });
+    }
 
     const orderId = `${productId}-${Date.now()}`;
 
     const payload = {
       price_amount: product.priceUsd,
       price_currency: "usd",
-      pay_currency: payCurrency,
+      pay_currency: payCurrency, // "any" = BTC, ETH, USDT, TRX, ALL AVAILABLE
       order_id: orderId,
       order_description: product.name,
       ipn_callback_url: `${process.env.BACKEND_URL}/api/ipn`,
@@ -200,26 +133,81 @@ app.post("/api/create-payment", async (req, res) => {
   }
 });
 
-// ------------------ CHECK ORDER STATUS ------------------
+// ---------------- IPN WEBHOOK ----------------
+app.post(
+  "/api/ipn",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      const payload = req.body.toString("utf8");
+      const sentSig = req.headers["x-nowpayments-sig"];
+
+      const expectedSig = crypto
+        .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
+        .update(payload)
+        .digest("hex");
+
+      if (sentSig !== expectedSig) {
+        console.warn("Invalid signature");
+        return res.status(403).send("Invalid signature");
+      }
+
+      const data = JSON.parse(payload);
+      const paymentId = data.payment_id;
+
+      const order = orders[paymentId];
+      if (!order) return res.status(200).send("OK");
+
+      order.status = data.payment_status;
+
+      if (
+        data.payment_status === "finished" ||
+        data.payment_status === "confirmed" ||
+        data.payment_status === "sending"
+      ) {
+        const product = PRODUCTS[order.productId];
+        if (product) {
+          const token = crypto.randomBytes(24).toString("hex");
+
+          downloadTokens[token] = {
+            filePath: getFilePath(product.fileName),
+            expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
+          };
+
+          order.downloadToken = token;
+        }
+      }
+
+      return res.status(200).send("OK");
+    } catch (err) {
+      console.error("IPN handler error:", err.message);
+      return res.status(500).send("error");
+    }
+  }
+);
+
+// ---------------- CHECK ORDER STATUS ----------------
 app.get("/api/order/:paymentId", (req, res) => {
   const order = orders[req.params.paymentId];
   if (!order) return res.status(404).json({ error: "Order not found" });
 
-  res.json({
+  return res.json({
     status: order.status,
     downloadToken: order.downloadToken,
   });
 });
 
-// ------------------ DOWNLOAD FILE ------------------
+// ---------------- DOWNLOAD FILE ----------------
 app.get("/api/download/:token", (req, res) => {
   const tokenData = downloadTokens[req.params.token];
 
-  if (!tokenData) return res.status(410).send("Download expired or invalid.");
+  if (!tokenData) {
+    return res.status(410).send("Download expired or invalid.");
+  }
 
   if (Date.now() > tokenData.expiresAt) {
     delete downloadTokens[req.params.token];
-    return res.status(410).send("Download expired.");
+    return res.status(410).send("Download expired. Please purchase again.");
   }
 
   const filePath = tokenData.filePath;
@@ -229,7 +217,7 @@ app.get("/api/download/:token", (req, res) => {
   return res.download(filePath, path.basename(filePath));
 });
 
-// ------------------ HEALTH CHECK ------------------
+// ---------------- HEALTH ----------------
 app.get("/", (req, res) => {
   res.send("BYTRON NOWPayments backend running");
 });
