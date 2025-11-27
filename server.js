@@ -91,7 +91,7 @@ app.post("/api/create-payment", async (req, res) => {
     const payload = {
       price_amount: product.priceUsd,
       price_currency: "usd",
-      pay_currency: "trc20usdt", // FIXED — CORRECT CURRENCY CODE
+      pay_currency: "usdttrc20", // FIXED — CORRECT CURRENCY CODE
       order_id: orderId,
       order_description: product.name,
       ipn_callback_url: `${process.env.BACKEND_URL}/api/ipn`,
@@ -236,3 +236,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
