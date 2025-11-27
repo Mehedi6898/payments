@@ -195,14 +195,7 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
 
-import cors from "cors";
-import dotenv from "dotenv";
-import axios from "axios";
-import crypto from "crypto";
-import path from "path";
-import { fileURLToPath } from "url";
 
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -412,5 +405,6 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
 });
+
 
 
