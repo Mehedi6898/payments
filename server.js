@@ -18,9 +18,7 @@ const __dirname = path.dirname(__filename);
 // normal JSON for all routes except IPN
 app.use(cors());
 app.use(express.json());
-app.get("/test", (req, res) => {
-  res.send("BYTRON Backend Working 🚀");
-});
+
 // ---------- SIMPLE IN-MEMORY STORAGE (OK FOR LOW TRAFFIC) ----------
 /**
  * orders[paymentId] = {
@@ -262,5 +260,6 @@ app.get("/", (_req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
