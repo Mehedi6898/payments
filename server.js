@@ -11,13 +11,66 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// dirname fix for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// middleware
+// CORS first
 app.use(cors());
+
+/* ------------------- RAW BODY FIRST ------------------- */
+app.post(
+  "/api/ipn",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      const raw = req.body.toString("utf8");
+      const sent = req.headers["x-nowpayments-sig"];
+
+      const expected = crypto
+        .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
+        .update(raw)
+        .digest("hex");
+
+      if (sent !== expected) {
+        console.warn("Invalid signature");
+        return res.status(403).send("Invalid signature");
+      }
+
+      const data = JSON.parse(raw);
+      const paymentId = data.payment_id;
+      const order = orders[paymentId];
+      if (!order) return res.status(200).send("OK");
+
+      order.status = data.payment_status;
+
+      if (
+        data.payment_status === "finished" ||
+        data.payment_status === "confirmed" ||
+        data.payment_status === "sending"
+      ) {
+        const product = PRODUCTS[order.productId];
+        if (product) {
+          const token = crypto.randomBytes(24).toString("hex");
+          downloadTokens[token] = {
+            filePath: getFilePath(product.fileName),
+            expiresAt: Date.now() + 30 * 60 * 1000,
+          };
+          order.downloadToken = token;
+        }
+      }
+
+      return res.status(200).send("OK");
+    } catch (e) {
+      console.error("IPN error:", e.message);
+      return res.status(500).send("IPN error");
+    }
+  }
+);
+
+/* ------------------- JSON AFTER IPN ------------------- */
 app.use(express.json({ limit: "5mb" }));
+
+// rest of your routes...
 
 // store orders + download tokens
 const orders = {};
@@ -228,6 +281,7 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
