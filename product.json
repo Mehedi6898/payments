@@ -1,0 +1,47 @@
+{
+  "mostbet-aviator": {
+    "name": "Mostbet Aviator",
+    "price": 20,
+    "file": "mostbet-aviator-spribe.zip"
+  },
+  "1win-aviator": {
+    "name": "1Win Aviator",
+    "price": 20,
+    "file": "1win-aviator-spribe.zip"
+  },
+  "1xbet-crash": {
+    "name": "1Xbet Crash",
+    "price": 20,
+    "file": "1xbet-crash.zip"
+  },
+  "luckyjet": {
+    "name": "LuckyJet",
+    "price": 20,
+    "file": "luckyjet.zip"
+  },
+  "thimbles": {
+    "name": "Thimbles",
+    "price": 20,
+    "file": "thimbles.zip"
+  },
+  "wild-west-gold": {
+    "name": "Wild West Gold",
+    "price": 20,
+    "file": "wild-west-gold.zip"
+  },
+  "higher-vs-lower": {
+    "name": "Higher vs Lower",
+    "price": 20,
+    "file": "higher-vs-lower.zip"
+  },
+  "dragons-gold": {
+    "name": "Dragons Gold",
+    "price": 20,
+    "file": "dragons-gold.zip"
+  },
+  "apple-of-fortune": {
+    "name": "Apple of Fortune",
+    "price": 20,
+    "file": "apple-of-fortune.zip"
+  }
+}
