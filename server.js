@@ -149,9 +149,23 @@ app.post(
       }
 
       // ========= REAL SIGNATURE VALIDATION =========
+      // ---------------- IPN WEBHOOK ----------------
+import bodyParser from "body-parser";
+
+// disable JSON parsing for this ONE route
+app.post(
+  "/api/ipn",
+  bodyParser.raw({ type: "*/*" }),
+  (req, res) => {
+    try {
+      const payload = req.body; // raw buffer
+      const rawBody = payload.toString("utf8");
+
+      const sentSig = req.headers["x-nowpayments-sig"];
+
       const expectedSig = crypto
         .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
-        .update(payload)
+        .update(rawBody)
         .digest("hex");
 
       if (sentSig !== expectedSig) {
@@ -159,15 +173,14 @@ app.post(
         return res.status(403).send("Invalid signature");
       }
 
-      const data = JSON.parse(payload);
+      const data = JSON.parse(rawBody);
       const paymentId = data.payment_id;
-      const order = orders[paymentId];
 
+      const order = orders[paymentId];
       if (!order) return res.status(200).send("OK");
 
       order.status = data.payment_status;
 
-      // payment completed → generate download token
       if (
         data.payment_status === "finished" ||
         data.payment_status === "confirmed" ||
@@ -176,21 +189,22 @@ app.post(
         const product = PRODUCTS[order.productId];
         if (product) {
           const token = crypto.randomBytes(24).toString("hex");
-
           downloadTokens[token] = {
             filePath: getFilePath(product.fileName),
-            expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
+            expiresAt: Date.now() + 30 * 60 * 1000,
           };
-
           order.downloadToken = token;
         }
       }
 
       return res.status(200).send("OK");
     } catch (err) {
-      console.error("IPN error:", err.message);
+      console.error("IPN handler error:", err.message);
       return res.status(500).send("error");
     }
+  }
+);
+
   }
 );
 
@@ -234,3 +248,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
