@@ -142,10 +142,18 @@ app.post("/api/ipn", (req, res) => {
       .update(rawBody)
       .digest("hex");
 
-    if (sentSig !== expectedSig) {
-      console.log("❌ INVALID SIGNATURE");
-      return res.status(403).send("Invalid signature");
-    }
+  // allow NOWPayments test notifications
+if (sentSig === "test_signature") {
+  console.log("NOWPayments test IPN received");
+  return res.status(200).send("OK");
+}
+
+// validate real signature
+if (sentSig !== expectedSig) {
+  console.warn("Invalid signature");
+  return res.status(403).send("Invalid signature");
+}
+
 
     const data = JSON.parse(rawBody);
     const order = orders[data.payment_id];
@@ -212,3 +220,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
